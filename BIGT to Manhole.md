@@ -21,4 +21,4 @@ Select the BIGT need to be flow to, then the manhole.
 
 <img width="800" height="433" alt="BIGT Manhole" src="https://github.com/user-attachments/assets/379419ee-0d62-4c9c-a266-5cebda1b3e62" />
 
-The pipe will override in $${\color{red}RED}$$ color if the pipe invert level lower than the manhole "invert level X1"
+The pipe will override in $\textcolor{red}{RED}$ color if the pipe invert level lower than the manhole "invert level X1"
