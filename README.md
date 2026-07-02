@@ -6,11 +6,11 @@ Released Addin location [here](https://github.com/TTQQAAQ/Multi_Revit_Version-Ad
 
 Before unzip the .rar file
 
-Open the proporties and uncheck the box below
+Open the proporties and check the box below
 
 <img width="400" height="544" alt="image" src="https://github.com/user-attachments/assets/2622c7d9-4590-44c9-b105-5ce44c129443" />
 
-<img width="408" height="572" alt="image" src="https://github.com/user-attachments/assets/aba1cb8c-0c0b-47c5-b6b7-55f922d90d0f" />
+<img width="450" height="509" alt="image" src="https://github.com/user-attachments/assets/d3a7f23c-90b4-45ae-8f60-1c199167f034" />
 
 Double click "Multi_Revit_Version_Install.bat"
 
