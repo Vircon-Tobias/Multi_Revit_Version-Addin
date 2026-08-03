@@ -1,0 +1,416 @@
+using Autodesk.Revit.DB;
+using Autodesk.Revit.DB.Electrical;
+using Autodesk.Revit.DB.Mechanical;
+using Autodesk.Revit.DB.Plumbing;
+using Multi_Revit_Version_Reference;
+using System;
+using System.Collections.Generic;
+using System.Collections.ObjectModel;
+using System.ComponentModel;
+using System.Linq;
+using System.Windows;
+using System.Windows.Controls;
+using System.Windows.Input;
+using System.Windows.Media.TextFormatting;
+using static Multi_Revit_Version_Reference.WPF_ListData;
+
+namespace Multi_Revit_Version_Window
+{
+    // ⚡ 恢復最乾淨的繼承 Window，完全不呼叫 OnPropertyChanged，徹底避開名稱衝突
+    public partial class Array_Window : Window
+    {
+        public ObservableCollection<Array_SettingItem> GridItems { get; set; }
+        public List<string> Typelist { get; set; }
+        public List<string> SystemTypeList { get; set; }
+        public List<string> PipeSizeList { get; set; }
+        private bool _isUpdating = false;
+        private Document Doc;
+
+        public Array_Window(Document doc)
+        {
+            InitializeComponent();
+            Doc = doc;
+
+            this.DataContext = this;
+
+            IList<string> _MEPTypelist = new List<string> { "Pipe", "Duct", "Cable Tray" };
+            IList<string> _SettingOutlist = new List<string> { "Edge to Edge", "Center to Center" };
+            IList<string> _Levellist = new FilteredElementCollector(Doc).OfCategory(BuiltInCategory.OST_Levels).WhereElementIsNotElementType().Select(x => x.Name).ToList();
+
+            this.MEPType_Combobox.ItemsSource = _MEPTypelist;
+            this.SettingOut_Combobox.ItemsSource = _SettingOutlist;
+            this.Level_Combobox.ItemsSource = _Levellist;
+
+            if (!string.IsNullOrWhiteSpace(ListData.Array_UsedLevelOffset))
+                this.LevelOffset_TextBox.Text = ListData.Array_UsedLevelOffset;
+
+
+            // 1. 初始化資料集合
+            GridItems = new ObservableCollection<Array_SettingItem>();
+
+            // 2. ⚡ 關鍵記憶還原邏輯：檢查全域 ListData 是否有上一次遺留的設定資料
+            if (ListData.Array_MEPdata != null && ListData.Array_MEPdata.Count > 0)
+            {
+                // 記憶還原 A：還原最上方的三個大選單設定 (若全域內有紀錄則自動對齊)
+                if (_MEPTypelist.Contains(ListData.Array_UsedMEP)) this.MEPType_Combobox.Text = ListData.Array_UsedMEP;
+                if (_SettingOutlist.Contains(ListData.Array_UsedSettingOut)) this.SettingOut_Combobox.Text = ListData.Array_UsedSettingOut;
+                if (_Levellist.Contains(ListData.Array_UsedLevel)) this.Level_Combobox.Text = ListData.Array_UsedLevel;
+
+                // 根據當時儲存的大類別，撈取對應的 Revit 清單以利 DataGrid 格子內的 ComboBox 順利渲染
+                LoadMepListsByCurrentCategory();
+
+                // 記憶還原 B：將上次存入的 ListData.Array_MEPdata 逐筆倒回 GridItems 中
+                foreach (List<string> rowData in ListData.Array_MEPdata)
+                {
+                    // 根據你 Done 按鈕內定義的順序：0:No, 1:Type, 2:SystemType, 3:Size, 4:Interval
+                    if (rowData.Count >= 5)
+                    {
+                        string rNo = rowData[0];
+                        string rType = rowData[1];
+                        string rSystemType = rowData[2];
+                        string rSize = rowData[3];
+                        string rInterval = rowData[4];
+
+                        // 針對 Pipe 模式，每一行必須特別重新向 Revit 計算它專屬的 LocalPipeSizeList
+                        List<string> rLocalSizes = new List<string>();
+                        if (this.MEPType_Combobox.Text == "Pipe")
+                        {
+                            rLocalSizes = Method_Variable.GetSizesByPipeTypeName(Doc, rType);
+                        }
+
+                        GridItems.Add(new Array_SettingItem
+                        {
+                            No = rNo,
+                            Type = rType,
+                            SystemType = rSystemType,
+                            LocalPipeSizeList = rLocalSizes,
+                            Size = rSize,
+                            Interval = rInterval
+                        });
+                    }
+                }
+
+                // 記憶還原 C：更新下方 Total Rows 框的文字為歷史行數
+                if (TxtRowCount != null) TxtRowCount.Text = GridItems.Count.ToString();
+            }
+            else
+            {
+                // ⚡ 備援計畫：若 ListData 是空的（第一次開視窗），則執行你原本預設的 3 行空資料初始化
+                this.Typelist = new FilteredElementCollector(Doc).OfClass(typeof(PipeType)).Cast<PipeType>().Select(x => x.Name).Distinct().ToList();
+                this.SystemTypeList = new FilteredElementCollector(Doc).OfClass(typeof(PipingSystemType)).Cast<PipingSystemType>().Select(x => x.Name).Distinct().ToList();
+
+                string defaultType = Typelist.FirstOrDefault() ?? "";
+                List<string> defaultPipeSizes = Method_Variable.GetSizesByPipeTypeName(Doc, defaultType);
+
+                GridItems.Add(new Array_SettingItem { No = "1", Type = defaultType, SystemType = SystemTypeList.FirstOrDefault() ?? "", LocalPipeSizeList = defaultPipeSizes, Size = defaultPipeSizes.FirstOrDefault() ?? "", Interval = "" });
+                GridItems.Add(new Array_SettingItem { No = "2", Type = defaultType, SystemType = SystemTypeList.FirstOrDefault() ?? "", LocalPipeSizeList = defaultPipeSizes, Size = defaultPipeSizes.FirstOrDefault() ?? "", Interval = "" });
+                GridItems.Add(new Array_SettingItem { No = "3", Type = defaultType, SystemType = SystemTypeList.FirstOrDefault() ?? "", LocalPipeSizeList = defaultPipeSizes, Size = defaultPipeSizes.FirstOrDefault() ?? "", Interval = "" });
+
+                if (TxtRowCount != null) TxtRowCount.Text = "3";
+            }
+
+            // 3. 掛載大選單事件（放在還原之後，避免初始化時被誤觸發導致資料錯亂）
+            this.MEPType_Combobox.SelectionChanged += MEPType_Combobox_SelectionChanged;
+
+            // 如果是第一次開視窗才需要手動下 index，若有舊資料則保留上面還原的 Text 即可
+            if (ListData.Array_MEPdata == null || ListData.Array_MEPdata.Count == 0)
+            {
+                this.MEPType_Combobox.SelectedIndex = 0;
+                this.SettingOut_Combobox.SelectedIndex = 1;
+                this.Level_Combobox.SelectedIndex = 0;
+            }
+
+            MepDataGrid.ItemsSource = GridItems;
+            GridItems.CollectionChanged += GridItems_CollectionChanged;
+            MepDataGrid.CellEditEnding += MepDataGrid_CellEditEnding;
+        }
+        private void LoadMepListsByCurrentCategory()
+        {
+            string currentMepText = this.MEPType_Combobox.Text;
+            if (currentMepText == "Pipe")
+            {
+                Typelist = new FilteredElementCollector(Doc).OfClass(typeof(PipeType)).Cast<PipeType>().Select(x => x.Name).Distinct().ToList();
+                SystemTypeList = new FilteredElementCollector(Doc).OfClass(typeof(PipingSystemType)).Cast<PipingSystemType>().Select(x => x.Name).Distinct().ToList();
+            }
+            else if (currentMepText == "Duct")
+            {
+                Typelist = new FilteredElementCollector(Doc).OfClass(typeof(DuctType)).Cast<DuctType>().Select(x => x.Name).Distinct().ToList();
+                SystemTypeList = new FilteredElementCollector(Doc).OfClass(typeof(MechanicalSystemType)).Cast<MechanicalSystemType>().Select(x => x.Name).Distinct().ToList();
+            }
+            else if (currentMepText == "Cable Tray")
+            {
+                Typelist = new FilteredElementCollector(Doc).OfClass(typeof(CableTrayType)).Cast<CableTrayType>().Select(x => x.Name).Distinct().ToList();
+                SystemTypeList = new List<string>();
+            }
+        }
+        private void MEPType_Combobox_SelectionChanged(object sender, SelectionChangedEventArgs e)
+        {
+            if (this.MEPType_Combobox.SelectedIndex == 0) // Pipe
+            {
+                Typelist = new FilteredElementCollector(Doc).OfClass(typeof(PipeType)).Cast<PipeType>().Select(x => x.Name).Distinct().ToList();
+                SystemTypeList = new FilteredElementCollector(Doc).OfClass(typeof(PipingSystemType)).Cast<PipingSystemType>().Select(x => x.Name).Distinct().ToList();
+
+            }
+            else if (this.MEPType_Combobox.SelectedIndex == 1) // Duct
+            {
+                Typelist = new FilteredElementCollector(Doc).OfClass(typeof(DuctType)).Cast<DuctType>().Select(x => x.Name).Distinct().ToList();
+                SystemTypeList = new FilteredElementCollector(Doc).OfClass(typeof(MechanicalSystemType)).Cast<MechanicalSystemType>().Select(x => x.Name).Distinct().ToList();
+            }
+            else if (this.MEPType_Combobox.SelectedIndex == 2) // Cable Tray
+            {
+                Typelist = new FilteredElementCollector(Doc).OfClass(typeof(CableTrayType)).Cast<CableTrayType>().Select(x => x.Name).Distinct().ToList();
+                SystemTypeList = new List<string> ();
+            }
+
+            if (GridItems != null && !_isUpdating)
+            {
+                foreach (var item in GridItems)
+                {
+                    item.Type = Typelist.FirstOrDefault() ?? "";
+                    item.SystemType = SystemTypeList.FirstOrDefault() ?? "";
+
+                    // ⚡ 關鍵修正 D：當選單切換成 Pipe 時，每一行也要重新去撈取該 Type 的 LocalPipeSizeList
+                    if (this.MEPType_Combobox.SelectedIndex == 0)
+                    {
+                        item.LocalPipeSizeList = Method_Variable.GetSizesByPipeTypeName(Doc, item.Type);
+                        item.Size = item.LocalPipeSizeList.FirstOrDefault() ?? "";
+                    }
+                    else
+                    {
+                        item.LocalPipeSizeList = new List<string>();
+                        item.Size = ""; // Duct/Tray 模式清空 Size 讓使用者輸入
+                    }
+                }
+
+                MepDataGrid.ItemsSource = null;
+                MepDataGrid.ItemsSource = GridItems;
+            }
+        }
+        private void GridType_SelectionChanged(object sender, SelectionChangedEventArgs e)
+        {
+            // ⚡ 防禦判斷：確保是使用者操作聚焦，防止 DataGrid.Refresh 造成死鎖
+            if (sender is ComboBox cb && cb.IsKeyboardFocusWithin && cb.DataContext is Array_SettingItem item)
+            {
+                if (this.MEPType_Combobox.SelectedIndex == 0) // 只有 Pipe 模式需要重新計算管徑
+                {
+                    // 💡 終極防錯：優先從 e.AddedItems 抓取使用者「用滑鼠剛點下去」的那個新選項
+                    string selectedPipeType = null;
+                    if (e.AddedItems != null && e.AddedItems.Count > 0)
+                    {
+                        selectedPipeType = e.AddedItems[0] as string;
+                    }
+
+                    // 如果從 AddedItems 沒拿到，再用 SelectedValue 備援
+                    if (string.IsNullOrEmpty(selectedPipeType))
+                    {
+                        selectedPipeType = cb.SelectedValue as string;
+                    }
+
+                    if (!string.IsNullOrEmpty(selectedPipeType))
+                    {
+                        // 1. 強制更新當前行的 Type 值
+                        item.Type = selectedPipeType;
+
+                        // 2. 即時去 Revit 撈取該水管專屬的管徑清單，並更新當前行
+                        item.LocalPipeSizeList = Method_Variable.GetSizesByPipeTypeName(Doc, selectedPipeType);
+                        item.Size = item.LocalPipeSizeList.FirstOrDefault() ?? "";
+
+                        // 3. 延遲重整 DataGrid，強迫隔壁的 Size ComboBox 當場刷出新選項
+                        Dispatcher.BeginInvoke(new Action(() =>
+                        {
+                            _isUpdating = true;
+                            MepDataGrid.ItemsSource = null;
+                            MepDataGrid.ItemsSource = GridItems;
+                            _isUpdating = false;
+                        }));
+                    }
+                }
+            }
+        }
+
+        private void GridItems_CollectionChanged(object sender, System.Collections.Specialized.NotifyCollectionChangedEventArgs e)
+        {
+            if (_isUpdating) return;
+            _isUpdating = true;
+
+            for (int i = 0; i < GridItems.Count; i++)
+            {
+                GridItems[i].No = (i + 1).ToString();
+            }
+
+            if (TxtRowCount != null) TxtRowCount.Text = GridItems.Count.ToString();
+            _isUpdating = false;
+        }
+
+        private void TxtRowCount_KeyDown(object sender, KeyEventArgs e)
+        {
+            // ⚡ 關鍵控制：只有在使用者按下 Enter 鍵（或是小鍵盤的 Enter）時才執行行數更新
+            if (e.Key == Key.Enter || e.Key == Key.Return)
+            {
+                if (_isUpdating || GridItems == null) return;
+
+                // 強制讓這個 TextBox 失去焦點，可以順便優化 WPF 的內建文字刷新時機
+                TxtRowCount.MoveFocus(new TraversalRequest(FocusNavigationDirection.Next));
+
+                if (int.TryParse(TxtRowCount.Text, out int targetCount) && targetCount >= 0)
+                {
+                    _isUpdating = true;
+
+                    // 1. 如果目前的行數少於目標行數 ➔ 補足不夠的行
+                    while (GridItems.Count < targetCount)
+                    {
+                        string currentDefaultType = Typelist.FirstOrDefault() ?? "";
+                        List<string> currentSizes = new List<string>();
+                        string currentSizeValue = "";
+
+                        if (this.MEPType_Combobox.SelectedIndex == 0) // Pipe 模式下補行
+                        {
+                            currentSizes = Method_Variable.GetSizesByPipeTypeName(Doc, currentDefaultType);
+                            currentSizeValue = currentSizes.FirstOrDefault() ?? "";
+                        }
+
+                        GridItems.Add(new Array_SettingItem
+                        {
+                            No = (GridItems.Count + 1).ToString(),
+                            Type = currentDefaultType,
+                            SystemType = SystemTypeList.FirstOrDefault() ?? "",
+                            LocalPipeSizeList = currentSizes,
+                            Size = currentSizeValue,
+                            Interval = ""
+                        });
+                    }
+
+                    // 2. 如果目前的行數多於目標行數 ➔ 從後面刪除多餘的行
+                    while (GridItems.Count > targetCount)
+                    {
+                        GridItems.RemoveAt(GridItems.Count - 1);
+                    }
+
+                    _isUpdating = false;
+
+                    // 3. 強制解除並重新載入 ItemSource，確保表格完美渲染
+                    MepDataGrid.ItemsSource = null;
+                    MepDataGrid.ItemsSource = GridItems;
+                }
+
+                // ⚡ 重要：標記此事件已被處理，防止 Enter 鍵的訊號繼續往上傳遞（避免誤觸發視窗底部的 Done 認列按鈕）
+                e.Handled = true;
+            }
+        }
+
+        private void MepDataGrid_CellEditEnding(object sender, DataGridCellEditEndingEventArgs e)
+        {
+            // ⚡ 1. 核心防禦：如果觸發事件的橫列是空的，或是最下方的預備新增列，立刻退出方法，絕不往下執行
+            if (e.Row == null || e.Row.Item == null || e.Row.Item.ToString() == "{NewItemPlaceholder}")
+                return;
+
+            // ⚡ 2. 安全轉型：確保轉型成功才繼續
+            if (e.Column.Header != null && e.Column.Header.ToString() == "Type" && e.Row.Item is Array_SettingItem item)
+            {
+                Dispatcher.BeginInvoke(new Action(() =>
+                {
+                    if (this.MEPType_Combobox.SelectedIndex == 0) // 只有 Pipe 模式需要重新計算管徑
+                    {
+                        // 加上 item.Type 的防空保護
+                        if (!string.IsNullOrEmpty(item.Type))
+                        {
+                            item.LocalPipeSizeList = Method_Variable.GetSizesByPipeTypeName(Doc, item.Type);
+                            item.Size = item.LocalPipeSizeList.FirstOrDefault() ?? "";
+
+                            MepDataGrid.ItemsSource = null;
+                            MepDataGrid.ItemsSource = GridItems;
+                        }
+                    }
+                }));
+            }
+        }
+        private void Done_Button_Click(object sender, RoutedEventArgs e)
+        {
+            // 1. 強制讓 DataGrid 正在輸入的格子認列資料（雙重保險）
+            if (MepDataGrid != null)
+            {
+                MepDataGrid.CommitEdit(DataGridEditingUnit.Cell, true);
+                MepDataGrid.CommitEdit(DataGridEditingUnit.Row, true);
+            }
+
+            this.Done_Button.Focus();
+
+            System.Text.StringBuilder sb = new System.Text.StringBuilder();
+            sb.AppendLine($"[成功讀取資料] 目前總共有 {GridItems.Count} 筆 MEP 設定：\n");
+
+            List<List<string>> _Datalist = new List<List<string>>();
+            foreach (Array_SettingItem item in GridItems)
+            {
+                List<string> _Data = new List<string>();
+
+                string no = item.No;
+                string type = item.Type;
+                string systemType = item.SystemType;
+                string size = item.Size;
+                string interval = item.Interval;
+
+                // 💡 調整：排除最下方可能因為 CanUserAddRows 產生的無序號空白列，以及完全沒填的行
+                if (string.IsNullOrWhiteSpace(no) ||
+                    (string.IsNullOrWhiteSpace(type) && string.IsNullOrWhiteSpace(size) && string.IsNullOrWhiteSpace(interval)))
+                    continue;
+
+                sb.AppendLine($"No.{no} ➔ SystemType: {systemType}, Type: {type}, Size: {size}, Interval: {interval}");
+
+                // ⚡ 依照你原本的順序寫入內部 _Datalist
+                _Data.Add(item.No);
+                _Data.Add(item.Type ?? "");
+                _Data.Add(item.SystemType ?? "");
+                _Data.Add(item.Size ?? "");
+                _Data.Add(item.Interval ?? "");
+
+                _Datalist.Add(_Data);
+            }
+
+            MessageBox.Show(sb.ToString(), "資料抽取成功");
+
+            // ⚡ 完美儲存全域變數，供後續外部命令（IExternalCommand）讀取建立元件
+            ListData.Array_UsedMEP = this.MEPType_Combobox.Text;
+            ListData.Array_UsedSettingOut = this.SettingOut_Combobox.Text;
+            ListData.Array_UsedLevel = this.Level_Combobox.Text; // ⚡ 順利對接新增的 Level 選單
+            ListData.Array_UsedLevelOffset = this.LevelOffset_TextBox.Text;
+            ListData.Array_MEPdata = _Datalist;
+
+            // 關閉視窗並回傳結果
+            this.DialogResult = true;
+            this.Close();
+        }
+
+
+        #region Common Setting
+        // ==================== 視窗基本控制事件 ====================
+
+        // 允許使用者滑鼠按住無邊框視窗的任何地方進行拖曳
+        private void Window_MouseDown(object sender, MouseButtonEventArgs e)
+        {
+            if (e.ChangedButton == MouseButton.Left)
+            {
+                this.DragMove();
+            }
+        }
+
+        // 快捷鍵支援：按 Esc 關閉、按 Enter 認列
+        private void Window_KeyDown(object sender, KeyEventArgs e)
+        {
+            if (e.Key == Key.Escape) Close_Button_Click(sender, e);
+            if (e.Key == Key.Enter) Done_Button_Click(sender, e);
+        }
+
+        // 右上角關閉按鈕
+        private void Close_Button_Click(object sender, RoutedEventArgs e) => this.Close();
+
+        // 右上角最小化按鈕
+        private void Minimize_Button_Click(object sender, RoutedEventArgs e) => this.WindowState = WindowState.Minimized;
+
+        // 右上角最大化 / 還原按鈕
+        private void Maximize_Button_Click(object sender, RoutedEventArgs e)
+        {
+            this.WindowState = this.WindowState == WindowState.Maximized ? WindowState.Normal : WindowState.Maximized;
+        }
+        #endregion 
+    }
+}
