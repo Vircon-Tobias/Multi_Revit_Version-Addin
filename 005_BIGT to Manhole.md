@@ -1,6 +1,6 @@
 <img width="315" height="96" alt="MEP_BIGT Manhole" src="https://github.com/user-attachments/assets/f8f87c83-4eb6-4739-8fd7-bb89c57bab61" />
 
-Before click the function, press the "MEP" at the bottom of the tab.
+Before using the function, press the "MEP" at the bottom of the tab.
 
 <img width="315" height="96" alt="MEP_BIGT Manhole_Step_1" src="https://github.com/user-attachments/assets/f913f8ec-0744-44f6-b954-12a290e67f77" />
 
