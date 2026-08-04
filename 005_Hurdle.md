@@ -12,4 +12,9 @@ Hurdle setting under "MEP" button
 
 <img width="830" height="244" alt="image" src="https://github.com/user-attachments/assets/45ded8de-97dc-4385-b819-4b325fd7bcde" />
 
+Select start point and end point for the hurdle, then select the MEP elements need to create hurdle.
+
+Press "ESC" when finish.
+
 <img width="600" height="325" alt="ezgif com-optimize (4)" src="https://github.com/user-attachments/assets/c826572d-ddc5-4f79-b878-2adb88b81559" />
+
