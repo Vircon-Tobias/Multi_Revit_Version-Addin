@@ -12,6 +12,5 @@ Input the name of the "Concrete Surround" duct type, duct system type will be th
 Input the concrete extent from pipe edge
 
 <img width="288" height="194" alt="image" src="https://github.com/user-attachments/assets/2712ff13-710c-4f31-b41b-bb293693ce0d" />
+
 <img width="1500" height="812" alt="EB34D34B-7572-49D3-939D-D45C4CEA649E" src="https://github.com/user-attachments/assets/95c1812e-8560-45ce-9966-f121941ff99e" />
-
-
